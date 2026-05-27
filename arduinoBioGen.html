@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aquarium Smart Control</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #f8f9fa; --card: #ffffff; --primary: #007aff; --text: #1d1d1f; --danger: #ff3b30; --success: #34c759; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 10px; }
+        .container { width: 100%; max-width: 500px; margin: 0 auto; box-sizing: border-box; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 0 10px; }
+        .status-badge { padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; background: #e0e0e0; cursor: pointer; }
+        .connected { background: var(--success); color: white; }
+        
+        .card { background: var(--card); border-radius: 18px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        h2 { font-size: 1.1rem; margin: 0 0 15px 0; display: flex; align-items: center; gap: 8px; }
+        
+        .param-group { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f2f2f2; flex-wrap: wrap; gap: 10px; }
+        .param-group:last-child { border-bottom: none; }
+        .label { font-size: 0.9rem; color: #86868b; }
+        
+        .input-wrapper { display: flex; align-items: center; gap: 8px; }
+        input { border: none; background: #f2f2f7; padding: 8px 12px; border-radius: 10px; font-family: inherit; font-weight: 600; text-align: right; color: var(--primary); outline: none; }
+        input[type="number"] { width: 70px; }
+        input[type="time"] { width: 90px; }
+        input[type="datetime-local"] { width: 100%; max-width: 180px; text-align: center; font-size: 0.85rem; }
+        input:focus { background: #e5e5ea; }
+        
+        .temp-main { font-size: 3rem; font-weight: 700; text-align: center; margin: 10px 0; color: var(--text); }
+        .status-display { font-size: 0.85rem; color: #86868b; text-align: center; margin-bottom: 10px; font-weight: 600; text-transform: uppercase; }
+        
+        .btn-action { width: 100%; padding: 15px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; margin-bottom: 10px; transition: 0.2s; }
+        .btn-stop { background: var(--danger); color: white; }
+        .btn-start { background: var(--success); color: white; }
+        .btn-test { background: #f2f2f7; color: var(--primary); border: 1px solid #e5e5ea; }
+        .btn-test:active { background: #e5e5ea; }
+
+        /* Styles pour le journal des logs */
+        .log-container { max-height: 300px; overflow-y: auto; font-size: 0.85rem; }
+        .log-entry { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f2f2f2; }
+        .log-time { color: #86868b; width: 80px; }
+        .log-name { flex-grow: 1; font-weight: 500; }
+        .log-state { font-weight: bold; width: 50px; text-align: right; }
+        .log-on { color: var(--success); }
+        .log-off { color: var(--danger); }
+
+        @media (max-width: 400px) {
+            .header h1 { font-size: 1.2rem; }
+            .temp-main { font-size: 2.5rem; }
+            .param-group { flex-direction: column; align-items: flex-start; }
+            .input-wrapper, input { width: 100% !important; max-width: none !important; text-align: left; }
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>Bio Générateur CO2</h1>
+        <div id="badge" class="status-badge" onclick="connect()">Connecter</div>
+    </div>
+
+    <button id="pauseBtn" class="btn-action btn-stop" onclick="togglePause()">ARRÊT D'URGENCE</button>
+
+    <div class="card">
+        <div class="temp-main" id="curTemp">--.-°C</div>
+        <div class="status-display" id="statusDisp">DÉCONNECTÉ</div>
+        <div class="param-group">
+            <span class="label">Température cible min</span>
+            <div class="input-wrapper">
+                <input type="number" id="SET_TMIN" step="0.5" onchange="sendVal(this)">
+                <span>°C</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🔥 Chauffage</h2>
+        <div class="param-group">
+            <span class="label">Chauffage Activé</span>
+            <div class="input-wrapper">
+                <input type="checkbox" id="SET_CHAUFF_ON" onchange="sendChauffOn(this)" style="width: 25px; height: 25px;">
+            </div>
+        </div>
+        <div class="param-group">
+            <span class="label">Heure démarrage</span>
+            <input type="time" id="SET_HCHAUFF_START" onchange="sendHHMM(this)">
+        </div>
+        <div class="param-group">
+            <span class="label">Heure arrêt</span>
+            <input type="time" id="SET_HCHAUFF_END" onchange="sendHHMM(this)">
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🍲 Alimentation</h2>
+        <div class="param-group">
+            <span class="label">Prochain passage</span>
+            <input type="datetime-local" id="SET_NALIM" onchange="sendTimestamp(this)">
+        </div>
+        <div class="param-group">
+            <span class="label">Heure de réf.</span>
+            <input type="time" id="SET_HALIM" onchange="sendHHMM(this)">
+        </div>
+        <div class="param-group">
+            <span class="label">Fréquence (jours)</span>
+            <input type="number" id="SET_FALIM" onchange="sendVal(this)">
+        </div>
+        <div class="param-group">
+            <span class="label">Durée pompe (sec)</span>
+            <input type="number" id="SET_DALIM" onchange="sendVal(this)">
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>💧 Vidange / Oxy</h2>
+        <div class="param-group">
+           <span class="label">Prochain passage</span>
+           <input type="datetime-local" id="SET_NVID" onchange="sendTimestamp(this)">
+        </div>
+        <div class="param-group">
+            <span class="label">Heure de réf.</span>
+            <input type="time" id="SET_HVID" onchange="sendHHMM(this)">
+        </div>
+        <div class="param-group">
+            <span class="label">Fréquence (jours)</span>
+            <input type="number" id="SET_FVID" onchange="sendVal(this)">
+        </div>
+        <div class="param-group">
+            <span class="label">Oxygénation (sec)</span>
+            <input type="number" id="SET_DOXY" onchange="sendVal(this)">
+        </div>
+        <div class="param-group">
+            <span class="label">Sécurité cuve (min)</span>
+            <input type="number" id="SET_TOUT" onchange="sendVal(this)">
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>⚙️ État capteurs</h2>
+        <div class="param-group">
+            <span class="label">Capteur bas</span>
+            <input type="text" id="CAPTEUR_BAS" readonly>
+        </div>
+        <div class="param-group">
+            <span class="label">Capteur haut</span>
+            <input type="text" id="CAPTEUR_HAUT" readonly>
+        </div>
+        <div class="param-group">
+            <span class="label">Pompe alimentation</span>
+            <input type="text" id="POMPE_ALIM" readonly>
+        </div>
+        <div class="param-group">
+            <span class="label">Pompe vidange</span>
+            <input type="text" id="POMPE_VIDANGE" readonly>
+        </div>
+        <div class="param-group">
+            <span class="label">Vanne remplissage</span>
+            <input type="text" id="VANNE_REMPLISSAGE" readonly>
+        </div>
+        <div class="param-group">
+            <span class="label">Bulleur oxygénation</span>
+            <input type="text" id="BULLEUR_OXYGENE" readonly>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🧪 Tests Actionneurs</h2>
+        <div class="param-group">
+            <span class="label">Durée des tests (sec)</span>
+            <div class="input-wrapper">
+                <input type="number" id="SET_DTEST" onchange="sendVal(this)">
+            </div>
+        </div>
+    </div>
+
+    <button id="testPompeAlimBtn" class="btn-action btn-test" onclick="sendTestPompeAlim()">TEST POMPE ALIM</button>
+    <button id="testOxyBtn" class="btn-action btn-test" onclick="sendTestOxygene()">TEST OXYGENE</button>
+    <button id="testVanneRemplissageBtn" class="btn-action btn-test" onclick="sendVanneRemplissage()">TEST VANNE REMPLISSAGE</button>
+    <button id="testPompeVidangeBtn" class="btn-action btn-test" onclick="sendPompeVidange()">TEST POMPE VIDANGE</button>
+
+    <div class="card">
+        <h2>📜 Journal des changements (50)</h2>
+        <div id="logJournal" class="log-container">
+            <div class="status-display">En attente de connexion...</div>
+        </div>
+    </div>
+    
+</div>
+
+<script>
+    let rxC, isPaused = false;
+    const SERV = "19b10000-e8f2-537e-4f31-d104768a1214", STAT = "19b10001-e8f2-537e-4f31-d104768a1214", RX = "19b10002-e8f2-537e-4f31-d104768a1214", LOG = "19b10003-e8f2-537e-4f31-d104768a1214";
+    let eventLogs = [];
+
+    async function connect() {
+        try {
+            console.log("Recherche de l'appareil...");
+            if (!navigator.bluetooth) {
+                throw new Error("Web Bluetooth n'est pas supporté par ce navigateur (utilisez Chrome) ou nécessite une connexion HTTPS sécurisée.");
+            }
+            const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERV] }] });
+            const server = await dev.gatt.connect();
+            const service = await server.getPrimaryService(SERV);
+            rxC = await service.getCharacteristic(RX);
+            const statusC = await service.getCharacteristic(STAT);
+            const logC = await service.getCharacteristic(LOG);
+
+            await send("TIME:" + Math.floor(Date.now() / 1000));
+            statusC.startNotifications();
+            statusC.addEventListener('characteristicvaluechanged', updateUI);
+
+            logC.startNotifications();
+            logC.addEventListener('characteristicvaluechanged', handleLog);
+            
+            document.getElementById('badge').innerText = "Connecté";
+            document.getElementById('badge').classList.add('connected');
+            document.getElementById('logJournal').innerHTML = "";
+        } catch(e) { 
+            console.error(e);
+            alert("Détails de l'erreur : " + e.name + " - " + e.message); 
+        }
+    }
+
+    function handleLog(event) {
+        const msg = new TextDecoder().decode(event.target.value);
+        const parts = msg.split('|');
+        if (parts.length === 3) {
+            const logEntry = {
+                ts: parseInt(parts[0]),
+                name: parts[1],
+                state: parts[2]
+            };
+            eventLogs.unshift(logEntry);
+            if (eventLogs.length > 50) eventLogs.pop();
+            renderLogs();
+        }
+    }
+
+    function renderLogs() {
+        const container = document.getElementById('logJournal');
+        if (!container) return;
+        container.innerHTML = eventLogs.map(log => {
+            const date = new Date(log.ts * 1000);
+            const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const badgeClass = log.state === "ON" ? "log-on" : "log-off";
+            return `<div class="log-entry">
+                <span class="log-time">${timeStr}</span>
+                <span class="log-name">${log.name}</span>
+                <span class="log-state ${badgeClass}">${log.state}</span>
+            </div>`;
+        }).join('');
+    }
+
+    function updateUI(event) {
+        try {
+            const data = new TextDecoder().decode(event.target.value).split('|');
+            if(data.length < 18) return;
+
+            updateField('statusDisp', data[0]);
+            updateField('SET_TMIN', data[1], true);
+            updateField('SET_DALIM', data[2], true);
+            updateField('SET_DOXY', data[3], true);
+            updateField('SET_TOUT', data[4], true);
+            updateField('SET_FALIM', data[5], true);
+            updateField('SET_FVID', data[6], true);
+            updateField('SET_HALIM', formatHHMM(data[7]), true);
+            updateField('SET_HVID', formatHHMM(data[8]), true);
+            
+            // Mise à jour des calendriers (Timestamp vers Format HTML local)
+            if(data[9] > 0) updateCalendarField('SET_NALIM', data[9]);
+            if(data[10] > 0) updateCalendarField('SET_NVID', data[10]);
+            updateField('SET_DTEST', data[11], true);
+
+            updateField('CAPTEUR_BAS', data[12] == 1 ? "ON" : "OFF", true);
+            updateField('CAPTEUR_HAUT', data[13] == 1 ? "ON" : "OFF", true);
+            updateField('POMPE_ALIM', data[14] == 1 ? "ON" : "OFF", true);
+            updateField('POMPE_VIDANGE', data[15] == 1 ? "ON" : "OFF", true);
+            updateField('VANNE_REMPLISSAGE', data[16] == 1 ? "ON" : "OFF", true);
+            updateField('BULLEUR_OXYGENE', data[17] == 1 ? "ON" : "OFF", true);
+            updateField('curTemp', data[18] + "°C");
+
+            if (data.length >= 22) {
+                updateField('SET_CHAUFF_ON', data[19] == 1, true);
+                updateField('SET_HCHAUFF_START', formatHHMM(data[20]), true);
+                updateField('SET_HCHAUFF_END', formatHHMM(data[21]), true);
+            }
+
+            isPaused = (data[0] === "STOP");
+            const btn = document.getElementById('pauseBtn');
+            btn.innerText = isPaused ? "REPRENDRE LE CYCLE" : "ARRÊT D'URGENCE";
+            btn.className = isPaused ? "btn-action btn-start" : "btn-action btn-stop";
+        } catch (e) { console.warn("Erreur UI:", e); }
+    }
+
+    function updateField(id, val, isInput = false) {
+        const el = document.getElementById(id);
+        if(!el || document.activeElement === el) return;
+        if(isInput) {
+            if (el.type === 'checkbox') el.checked = val;
+            else el.value = val;
+        } else el.innerText = val;
+    }
+
+    function updateCalendarField(id, ts) {
+        const el = document.getElementById(id);
+        if (!el || document.activeElement === el) return;
+        const date = new Date(ts * 1000);
+        const tzOffset = date.getTimezoneOffset() * 60000;
+        const localISOTime = new Date(date - tzOffset).toISOString().slice(0, 16);
+        el.value = localISOTime;
+    }
+
+    function formatHHMM(v) {
+        let s = v.toString().padStart(4, '0');
+        let h = Math.min(parseInt(s.substring(0, 2)), 23).toString().padStart(2, '0');
+        let m = Math.min(parseInt(s.substring(2, 4)), 59).toString().padStart(2, '0');
+        return h + ":" + m;
+    }
+
+    async function sendTimestamp(el) {
+        if (!el.value) return;
+        const timestamp = Math.floor(Date.parse(el.value) / 1000);
+        if (!isNaN(timestamp)) await send(el.id + ":" + timestamp);
+    }
+
+    async function send(m) { if(rxC) await rxC.writeValue(new TextEncoder().encode(m)); }
+    function sendVal(el) { send(el.id + ":" + el.value); }
+    function sendHHMM(el) { send(el.id + ":" + el.value.replace(':', '')); }
+    function sendChauffOn(el) { send("SET_CHAUFF_ON:" + (el.checked ? "1" : "0")); }
+    function togglePause() { send("PAUSE:" + (isPaused ? "0" : "1")); }
+    function sendTestPompeAlim() { send("TEST_POMPE_ALIM:0"); }
+    function sendTestOxygene() { send("TEST_OXYGENE:0"); }
+    function sendVanneRemplissage() { send("TEST_VANNE_REMPLISSAGE:0"); }
+    function sendPompeVidange() { send("TEST_POMPE_VIDANGE:0"); }
+</script>
+
+</body>
+</html>
