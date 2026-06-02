@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aquarium Smart Control</title>
+    <title>Bio Gen CO2</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap" rel="stylesheet">
     <style>
         :root { --bg: #f8f9fa; --card: #ffffff; --primary: #007aff; --text: #1d1d1f; --danger: #ff3b30; --success: #34c759; }
@@ -61,6 +61,8 @@
         <h1>Bio Générateur CO2</h1>
         <div id="badge" class="status-badge" onclick="connect()">Connecter</div>
     </div>
+
+    <div id="deviceTime" style="font-size: 0.75rem; color: #86868b; text-align: center; margin-bottom: 15px; font-weight: 500;"></div>
 
     <button id="pauseBtn" class="btn-action btn-stop" onclick="togglePause()">ARRÊT D'URGENCE</button>
 
@@ -208,16 +210,25 @@
             const statusC = await service.getCharacteristic(STAT);
             const logC = await service.getCharacteristic(LOG);
 
-            await send("TIME:" + Math.floor(Date.now() / 1000));
-            statusC.startNotifications();
+            // 1. S'abonner aux notifications d'abord
+            await statusC.startNotifications();
             statusC.addEventListener('characteristicvaluechanged', updateUI);
 
-            logC.startNotifications();
+            await logC.startNotifications();
             logC.addEventListener('characteristicvaluechanged', handleLog);
             
+            // 2. Préparer l'interface et vider la liste locale
+            eventLogs = []; 
+            document.getElementById('logJournal').innerHTML = "";
             document.getElementById('badge').innerText = "Connecté";
             document.getElementById('badge').classList.add('connected');
-            document.getElementById('logJournal').innerHTML = "";
+
+            // 3. Envoyer l'heure en dernier pour déclencher le dump de l'historique
+            // On attend un tout petit peu que les notifications soient bien actives
+            setTimeout(async () => {
+                await send("TIME:" + Math.floor(Date.now() / 1000));
+            }, 500);
+
         } catch(e) { 
             console.error(e);
             alert("Détails de l'erreur : " + e.name + " - " + e.message); 
@@ -256,10 +267,13 @@
 
     function updateUI(event) {
         try {
-            const data = new TextDecoder().decode(event.target.value).split('|');
+            const rawData = new TextDecoder().decode(event.target.value);
+            console.log("Data reçue:", rawData);
+            const data = rawData.split('|');
             if(data.length < 18) return;
 
-            updateField('statusDisp', data[0]);
+            const status = data[0].trim();
+            updateField('statusDisp', status);
             updateField('SET_TMIN', data[1], true);
             updateField('SET_DALIM', data[2], true);
             updateField('SET_DOXY', data[3], true);
@@ -288,10 +302,19 @@
                 updateField('SET_HCHAUFF_END', formatHHMM(data[21]), true);
             }
 
-            isPaused = (data[0] === "STOP");
+            const timeEl = document.getElementById('deviceTime');
+            if (timeEl && data.length >= 23 && data[22] > 0) {
+                const d = new Date(data[22] * 1000);
+                timeEl.innerText = "HEURE APPAREIL: " + d.toLocaleTimeString('fr-FR');
+            }
+
+            isPaused = (status === "STOP");
             const btn = document.getElementById('pauseBtn');
-            btn.innerText = isPaused ? "REPRENDRE LE CYCLE" : "ARRÊT D'URGENCE";
-            btn.className = isPaused ? "btn-action btn-start" : "btn-action btn-stop";
+            if (btn) {
+                btn.innerText = isPaused ? "REPRENDRE LE CYCLE" : "ARRÊT D'URGENCE";
+                btn.className = isPaused ? "btn-action btn-start" : "btn-action btn-stop";
+                btn.style.opacity = "1";
+            }
         } catch (e) { console.warn("Erreur UI:", e); }
     }
 
@@ -330,7 +353,21 @@
     function sendVal(el) { send(el.id + ":" + el.value); }
     function sendHHMM(el) { send(el.id + ":" + el.value.replace(':', '')); }
     function sendChauffOn(el) { send("SET_CHAUFF_ON:" + (el.checked ? "1" : "0")); }
-    function togglePause() { send("PAUSE:" + (isPaused ? "0" : "1")); }
+    function togglePause() { 
+        const nextState = isPaused ? "0" : "1";
+        send("PAUSE:" + nextState); 
+        
+        const btn = document.getElementById('pauseBtn');
+        if (btn) {
+            if (!isPaused) {
+                btn.innerText = "DEMANDE D'ARRÊT EN COURS...";
+                btn.style.opacity = "0.5";
+            } else {
+                btn.innerText = "DEMANDE DE REPRISE EN COURS...";
+                btn.style.opacity = "0.5";
+            }
+        }
+    }
     function sendTestPompeAlim() { send("TEST_POMPE_ALIM:0"); }
     function sendTestOxygene() { send("TEST_OXYGENE:0"); }
     function sendVanneRemplissage() { send("TEST_VANNE_REMPLISSAGE:0"); }
